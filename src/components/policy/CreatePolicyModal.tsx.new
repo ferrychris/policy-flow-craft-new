@@ -1,0 +1,373 @@
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { useAuth } from '@/lib/auth';
+import { supabase } from '@/lib/supabase';
+import { toast } from 'sonner';
+import { History, Download, Sparkles, RefreshCw } from 'lucide-react';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogDescription, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogFooter 
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { 
+  Tabs, 
+  TabsContent, 
+  TabsList, 
+  TabsTrigger 
+} from "@/components/ui/tabs";
+import { 
+  Form, 
+  FormControl, 
+  FormField, 
+  FormItem, 
+  FormLabel, 
+  FormMessage 
+} from "@/components/ui/form";
+
+// Form Schema
+type FormData = z.infer<typeof policySchema>;
+
+const policySchema = z.object({
+  organizationName: z.string().min(1, 'Organization name is required'),
+  website: z.string().url('Please enter a valid URL'),
+  industrySector: z.string().min(1, 'Industry sector is required'),
+  organizationSize: z.string().min(1, 'Organization size is required'),
+  geographicOperations: z.array(z.string()).min(1, 'Select at least one region'),
+  aiMaturityLevel: z.string().min(1, 'AI maturity level is required'),
+  ethicalPrinciples: z.array(z.string()),
+  riskCategories: z.array(z.string()),
+  regulations: z.array(z.string()),
+  standards: z.array(z.string()),
+  existingPolicies: z.array(z.string())
+});
+
+const formConfig = {
+  industrySectors: [
+    'Technology', 'Healthcare', 'Finance', 'Education', 'Retail', 'Manufacturing', 'Other'
+  ],
+  organizationSizes: [
+    '1-10 employees', '11-50 employees', '51-200 employees',
+    '201-1000 employees', '1001-5000 employees', '5000+ employees'
+  ],
+  regions: [
+    'North America', 'South America', 'Europe', 'Asia', 'Africa', 'Oceania'
+  ]
+};
+
+interface CreatePolicyModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function CreatePolicyModal({ open, onOpenChange }: CreatePolicyModalProps) {
+  const [step, setStep] = useState(1);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const { user } = useAuth();
+
+  const form = useForm<FormData>({
+    resolver: zodResolver(policySchema),
+    defaultValues: {
+      organizationName: '',
+      website: '',
+      industrySector: '',
+      organizationSize: '',
+      geographicOperations: [],
+      aiMaturityLevel: '',
+      ethicalPrinciples: [],
+      riskCategories: [],
+      regulations: [],
+      standards: [],
+      existingPolicies: []
+    },
+  });
+
+  const onSubmit = async (data: FormData) => {
+    if (!user) {
+      toast.error('You must be logged in to create a policy');
+      return;
+    }
+
+    setIsGenerating(true);
+
+    try {
+      const { data: policy, error } = await supabase
+        .from('policies')
+        .insert([
+          {
+            organization_name: data.organizationName,
+            website: data.website,
+            industry_sector: data.industrySector,
+            organization_size: data.organizationSize,
+            geographic_operations: data.geographicOperations,
+            ai_maturity_level: data.aiMaturityLevel,
+            ethical_principles: data.ethicalPrinciples,
+            risk_categories: data.riskCategories,
+            regulations: data.regulations,
+            standards: data.standards,
+            user_id: user.id,
+            status: 'draft',
+          },
+        ])
+        .select();
+
+      if (error) throw error;
+
+      toast.success('Policy created successfully!');
+      onOpenChange(false);
+    } catch (error) {
+      console.error('Error creating policy:', error);
+      toast.error('Failed to create policy');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleBack = () => {
+    if (step > 1) {
+      setStep(step - 1);
+    }
+  };
+
+  const handleNext = async () => {
+    if (step < 3) {
+      const isValid = await form.trigger();
+      if (isValid) {
+        setStep(step + 1);
+      }
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[800px]">
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle className="text-[#8a63d2]">Create New Policy - Step {step} of 3</DialogTitle>
+              <DialogDescription>
+                Fill in your organization's details to generate a customized AI policy.
+              </DialogDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="hover:bg-muted">
+                <History className="w-4 h-4 mr-2" />
+                History
+              </Button>
+              <Button size="sm" variant="outline" className="hover:bg-muted">
+                <Download className="w-4 h-4 mr-2" />
+                Export
+              </Button>
+            </div>
+          </div>
+          <DialogDescription>
+            {step === 1 && 'Enter basic organization information.'}
+            {step === 2 && 'Define AI maturity and policy areas.'}
+            {step === 3 && 'Select applicable regulations and standards.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <Tabs value={step.toString()} onValueChange={(value) => setStep(parseInt(value))}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="1">Organization</TabsTrigger>
+                <TabsTrigger value="2">AI Maturity</TabsTrigger>
+                <TabsTrigger value="3">Review</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="1">
+                <div className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="organizationName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Organization Name</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Acme Inc." {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="website"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Website</FormLabel>
+                        <FormControl>
+                          <Input placeholder="https://example.com" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="industrySector"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Industry Sector</FormLabel>
+                        <FormControl>
+                          <select
+                            {...field}
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <option value="">Select industry sector</option>
+                            {formConfig.industrySectors.map((sector) => (
+                              <option key={sector} value={sector}>
+                                {sector}
+                              </option>
+                            ))}
+                          </select>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </TabsContent>
+
+              <TabsContent value="2">
+                <div className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="organizationSize"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Organization Size</FormLabel>
+                        <FormControl>
+                          <select
+                            {...field}
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <option value="">Select organization size</option>
+                            {formConfig.organizationSizes.map((size) => (
+                              <option key={size} value={size}>
+                                {size}
+                              </option>
+                            ))}
+                          </select>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="geographicOperations"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Geographic Operations</FormLabel>
+                        <div className="grid grid-cols-2 gap-2">
+                          {formConfig.regions.map((region) => (
+                            <div key={region} className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                id={region}
+                                checked={field.value?.includes(region)}
+                                onChange={(e) => {
+                                  const newValue = e.target.checked
+                                    ? [...(field.value || []), region]
+                                    : (field.value || []).filter((r) => r !== region);
+                                  field.onChange(newValue);
+                                }}
+                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                              />
+                              <label
+                                htmlFor={region}
+                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                              >
+                                {region}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </TabsContent>
+
+              <TabsContent value="3">
+                <div className="space-y-4">
+                  <div className="rounded-lg border p-4">
+                    <h3 className="font-medium mb-2">Policy Summary</h3>
+                    <div className="space-y-2 text-sm">
+                      <p>
+                        <span className="font-medium">Organization Name:</span>{' '}
+                        {form.watch('organizationName') || 'Not provided'}
+                      </p>
+                      <p>
+                        <span className="font-medium">Website:</span>{' '}
+                        {form.watch('website') || 'Not provided'}
+                      </p>
+                      <p>
+                        <span className="font-medium">Industry Sector:</span>{' '}
+                        {form.watch('industrySector') || 'Not provided'}
+                      </p>
+                      <p>
+                        <span className="font-medium">Organization Size:</span>{' '}
+                        {form.watch('organizationSize') || 'Not provided'}
+                      </p>
+                      <p>
+                        <span className="font-medium">Geographic Operations:</span>{' '}
+                        {form.watch('geographicOperations')?.join(', ') || 'Not provided'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
+
+            <div className="flex justify-between pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleBack}
+                disabled={step === 1 || isGenerating}
+              >
+                Back
+              </Button>
+              <Button
+                type={step === 3 ? 'submit' : 'button'}
+                onClick={step === 3 ? undefined : handleNext}
+                disabled={isGenerating}
+                className="flex items-center gap-2"
+              >
+                {isGenerating ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : step === 3 ? (
+                  'Create Policy'
+                ) : (
+                  'Next'
+                )}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
