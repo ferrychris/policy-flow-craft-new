@@ -89,8 +89,16 @@ export function PolicySelectionForm({ form, disabled = false }: PolicySelectionF
     );
   }
   
-  const handleUpgradeClick = () => {
-    navigate('/pricing');
+  const handleUpgradeClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const currentPath = window.location.pathname;
+    const isInDashboard = currentPath.startsWith('/dashboard');
+    
+    if (isInDashboard) {
+      navigate('pricing'); // Relative path when already in dashboard
+    } else {
+      navigate('/dashboard/pricing'); // Full path when not in dashboard
+    }
   };
 
   return (
