@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import { User, supabase, AuthError } from '@/lib/supabase';
 import { fetchSubscription } from '@/lib/stripe/supabase';
 import { queryClient } from '@/lib/queryClient';
+import { DEFAULT_SUBSCRIPTION_STATE } from '@/lib/subscription';
 
 interface AuthContextType {
   user: User | null;
@@ -34,6 +35,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  const preloadSubscription = useCallback(async (userId: string) => {
+    try {
+      const subscription = await fetchSubscription(userId);
+      queryClient.setQueryData(['subscription'], subscription);
+      return subscription;
+    } catch (error) {
+      console.error('Failed to preload subscription:', error);
+      queryClient.setQueryData(['subscription'], DEFAULT_SUBSCRIPTION_STATE);
+      return DEFAULT_SUBSCRIPTION_STATE;
+    }
+  }, []);
+
   const signIn = async (email: string, password: string) => {
     setSubscriptionLoading(true);
     try {
@@ -43,17 +56,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       
       if (data.session?.user) {
-        // Preload subscription data
-        try {
-          const subscription = await fetchSubscription(data.session.user.id);
-          queryClient.setQueryData(['subscription'], subscription);
-        } catch (subError) {
-          console.error('Failed to preload subscription:', subError);
-          // Don't fail the login if subscription loading fails
-        }
+        // Preload subscription data in the background
+        // Don't await to avoid blocking the login flow
+        preloadSubscription(data.session.user.id).catch(console.error);
       }
       
       return { error };
+    } catch (error) {
+      console.error('Login error:', error);
+      return { error: error as AuthError };
     } finally {
       setSubscriptionLoading(false);
     }

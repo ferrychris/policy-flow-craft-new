@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../supabase/client';
 import { PlanTier } from './config';
+import { withSession, getValidSession } from '../session';
+import { DEFAULT_SUBSCRIPTION_STATE, ensureSubscriptionState } from '../subscription';
 
 export interface SubscriptionStatus {
   isActive: boolean;
@@ -26,49 +28,94 @@ const getPlanFromPriceId = (priceId: string): PlanTier | null => {
   return null;
 };
 
-// Separate function to fetch subscription data that can be used outside React components
+/**
+ * Fetches subscription data for the current user
+ * @throws {Error} If there's an error fetching the subscription
+ */
 export const fetchSubscription = async (userId: string): Promise<SubscriptionStatus> => {
-  const { data: subscription, error } = await supabase
-    .from('subscriptions')
-    .select('*')
-    .eq('user_id', userId)
-    .single();
+  try {
+    return await withSession(async (session) => {
+      if (session.user.id !== userId) {
+        console.warn('User ID mismatch between session and request');
+      }
 
-  if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned"
-    throw error;
+      const { data: subscription, error } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (error) {
+        // Handle specific error codes
+        if (['PGRST116', 'P0002', '22P02'].includes(error.code || '')) {
+          // No subscription found or invalid input
+          return DEFAULT_SUBSCRIPTION_STATE;
+        }
+        console.error('Subscription fetch error:', error);
+        throw error;
+      }
+
+      if (!subscription) {
+        return DEFAULT_SUBSCRIPTION_STATE;
+      }
+
+      const sub = subscription as unknown as StripeSubscription;
+      
+      return {
+        isActive: sub.status === 'active',
+        plan: getPlanFromPriceId(sub.price_id),
+        interval: sub.interval,
+        currentPeriodEnd: sub.current_period_end,
+        isCanceled: sub.cancel_at_period_end,
+      };
+    });
+  } catch (error) {
+    console.error('Error in fetchSubscription:', error);
+    throw new Error('Failed to fetch subscription data');
   }
-
-  if (!subscription) {
-    return {
-      isActive: false,
-      plan: null,
-      interval: 'month',
-      currentPeriodEnd: null,
-      isCanceled: false,
-    };
-  }
-
-  const sub = subscription as unknown as StripeSubscription;
-  
-  return {
-    isActive: sub.status === 'active',
-    plan: getPlanFromPriceId(sub.price_id),
-    interval: sub.interval,
-    currentPeriodEnd: sub.current_period_end,
-    isCanceled: sub.cancel_at_period_end,
-  };
 };
 
-export const useSubscription = (enabled = true) => {
-  return useQuery({
+interface UseSubscriptionOptions {
+  enabled?: boolean;
+  onError?: (error: Error) => void;
+}
+
+export const useSubscription = ({
+  enabled = true,
+  onError,
+}: UseSubscriptionOptions = {}) => {
+  return useQuery<SubscriptionStatus, Error>({
     queryKey: ['subscription'],
     queryFn: async (): Promise<SubscriptionStatus> => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('No active session');
+      try {
+        const session = await getValidSession();
+        return fetchSubscription(session.user.id);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const subscriptionError = new Error(`Failed to load subscription: ${errorMessage}`);
+        
+        if (onError) {
+          onError(subscriptionError);
+        } else {
+          console.error('Error in useSubscription:', subscriptionError);
+        }
+        
+        // Return default state but still propagate the error
+        // This allows components to handle the error while still having a valid state
+        return DEFAULT_SUBSCRIPTION_STATE;
       }
-      return fetchSubscription(session.user.id);
     },
     enabled,
+    retry: (failureCount, error) => {
+      // Don't retry if it's an auth error
+      if (error.message.includes('No active session') || 
+          error.message.includes('Failed to get session')) {
+        return false;
+      }
+      return failureCount < 2; // Retry up to 2 times
+    },
+    retryDelay: 1000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
   });
 };
