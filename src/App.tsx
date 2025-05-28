@@ -12,6 +12,7 @@ import TeamsPage from './pages/organization/teams';
 import PoliciesPage from './pages/organization/policies';
 import NotFound from './pages/NotFound';
 import { DashboardHome } from './components/dashboard/DashboardHome';
+import PricingPage from './pages/pricing/Index';
 
 const queryClient = new QueryClient();
 
@@ -42,6 +43,7 @@ const App = () => {
                       <Route path="organization">
                         <Route path="teams" element={<ProtectedRoute><TeamsPage /></ProtectedRoute>} />
                         <Route path="policies" element={<ProtectedRoute><PoliciesPage /></ProtectedRoute>} />
+                        <Route path='pricing' element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
                       </Route>
                       <Route path="generator" element={<ProtectedRoute><div>Policy Generator</div></ProtectedRoute>} />
                     </Route>
