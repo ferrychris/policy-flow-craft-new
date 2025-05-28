@@ -26,7 +26,40 @@ const getPlanFromPriceId = (priceId: string): PlanTier | null => {
   return null;
 };
 
-export const useSubscription = () => {
+// Separate function to fetch subscription data that can be used outside React components
+export const fetchSubscription = async (userId: string): Promise<SubscriptionStatus> => {
+  const { data: subscription, error } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+    throw error;
+  }
+
+  if (!subscription) {
+    return {
+      isActive: false,
+      plan: null,
+      interval: 'month',
+      currentPeriodEnd: null,
+      isCanceled: false,
+    };
+  }
+
+  const sub = subscription as unknown as StripeSubscription;
+  
+  return {
+    isActive: sub.status === 'active',
+    plan: getPlanFromPriceId(sub.price_id),
+    interval: sub.interval,
+    currentPeriodEnd: sub.current_period_end,
+    isCanceled: sub.cancel_at_period_end,
+  };
+};
+
+export const useSubscription = (enabled = true) => {
   return useQuery({
     queryKey: ['subscription'],
     queryFn: async (): Promise<SubscriptionStatus> => {
@@ -34,34 +67,8 @@ export const useSubscription = () => {
       if (!session) {
         throw new Error('No active session');
       }
-
-      const { data: subscription, error } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .single();
-
-      if (error) throw error;
-
-      if (!subscription) {
-        return {
-          isActive: false,
-          plan: null,
-          interval: 'month',
-          currentPeriodEnd: null,
-          isCanceled: false,
-        };
-      }
-
-      const sub = subscription as unknown as StripeSubscription;
-      
-      return {
-        isActive: sub.status === 'active',
-        plan: getPlanFromPriceId(sub.price_id),
-        interval: sub.interval,
-        currentPeriodEnd: sub.current_period_end,
-        isCanceled: sub.cancel_at_period_end,
-      };
+      return fetchSubscription(session.user.id);
     },
+    enabled,
   });
 };
